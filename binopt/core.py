@@ -171,6 +171,50 @@ class optimize_bin(binner_base):
             else:
                 return self._fom_(ns_, nb_, berr=breg, method=self.fom)
 
+    def binned_score_fit(self, x, breg=None, nsig=1):
+#     def binned_score_fit(self, x, y, W=None, mass=None, breg=None, nsig=1):
+        """
+        Input should contain a resonance of some sort.
+        """
+        _bounds_ = np.sort(np.insert(x, [0, x.shape[0]], [self.range]))
+#         _bounds_ = np.sort(np.insert(bounds, [0, bounds.shape[0]], [binner.range]))
+        _cats_ = np.digitize(x, _bounds_)
+#         _cats_ = np.digitize(X, _bounds_)
+        _seff_ = np.zeros(_bounds_.shape[0])
+        _nums_ = np.zeros(_bounds_.shape[0])
+        _numb_ = np.zeros(_bounds_.shape[0])
+        _errb_ = np.zeros(_bounds_.shape[0])
+        frac = np.abs(norm.cdf(0, -nsig, 1) - norm.cdf(0, nsig, 1))
+    
+#         for cid in range(1,_bounds_.shape[0]): (a,b) ==> (a, a+1,...,b-1)
+        for cid in range(_bounds_.shape[0] + 1):
+            def _obj(x):
+                out = -np.sum(
+                    self.sample_weights[(_cats_ == cid) & (self.y==0)]*st.expon(
+                        loc=100, scale=np.exp(x)
+                    ).logpdf(self.mass[(_cats_ == cid) & (self.y==0)])
+                )
+                if np.isnan(out):
+                    return 0
+                else:
+                    return out
+            _fit = minimize(_obj, x0=[0.03], method='Powell')
+            min_, max_ = binopt.tools.weighted_quantile(
+                self.mass[(_cats_ == cid)& (self.y==1)],
+                [norm.cdf(0, -nsig, 1), norm.cdf(0, nsig, 1)],
+                sample_weight=self.sample_weights[(_cats_ == cid) & (self.y==1)])
+        
+            _seff_[cid] = np.abs(max_-min_)/2.0
+       
+            _nums_[cid] = self.sample_weights[(_cats_ == cid) & (self.y==1)].sum()*frac
+            _numb_[cid] = np.abs(
+                st.expon(loc=100,scale=np.exp(_fit.x)).cdf(min_)-
+                st.expon(loc=100,scale=np.exp(_fit.x)).cdf(max_)
+            )
+            _errb_[cid] = np.sqrt((self.sample_weights[(_cats_ == cid) & (self.y==0)]**2).sum()*_numb_[cid])
+            _numb_[cid] *= self.sample_weights[(_cats_ == cid) & (self.y==0)].sum()
+        return binner._fom_(_nums_, _numb_, breg, method="AMS3")            
+            
     def cost_fun(self, x, breg=None, lower_bound=None, upper_bound=None):
         """Cost function."""
         z = None
